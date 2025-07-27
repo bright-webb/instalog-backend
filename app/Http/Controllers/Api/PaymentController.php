@@ -23,25 +23,47 @@ class PaymentController extends Controller
       
     }
 
-    public function getPaymentPlan(Request $request){
-        $cacheKey = 'user_plan_' . auth()->id();
-       $user = auth()->user();
-       // Check if user has plan
-       $plan = cache()->remember($cacheKey, now()->addHours(1), function() use ($user) {
-           return DB::table('plans')->where('user_id', $user->id)->first();
-       });
-       if($plan && $plan->is_active) {
-           return response()->json([
-               'success' => true,
-               'message' => 'User has an active plan',
-               'plan' => $plan
-           ]);
-       } else {
+   public function getPaymentPlan(Request $request)
+{
+    try {
+        $user = auth()->user();
+        $cacheKey = 'user_plan_' . $user->id . '_' . $user->updated_at->timestamp;
+
+        $plan = cache()->remember($cacheKey, now()->addHours(1), function() use ($user) {
+            $planData = DB::table('plans')->where('user_id', $user->id)->first();
+            
+            if ($planData) {
+                $planData->isPremium = (bool) DB::table('users')
+                    ->where('id', $user->id)
+                    ->value('is_premium');
+
+                $planData->name = $planData->isPremium ? 'Premium Plan' : 'Free Plan';
+            }
+            
+            return $planData;
+        });
+
+        if ($plan && $plan->is_active) {
+            return response()->json([
+                'success' => true,
+                'message' => 'User has an active plan',
+                'plan' => $plan
+            ]);
+        }
+
         return response()->json([
-            'success' => false
+            'success' => false,
+            'message' => 'No active plan found'
         ]);
-       }
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Error retrieving payment plan',
+            'error' => $e->getMessage()
+        ], 500);
     }
+}
 
 public function createPlan(Request $request)
 {
