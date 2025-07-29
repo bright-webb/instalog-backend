@@ -18,6 +18,8 @@ Route::post('check-verification-status', [AuthController::class, 'checkVerificat
 Route::post('/auth/refresh', [AuthController::class, 'refreshToken']);
 Route::post('/record-view/{productId}', [ProductController::class, 'recordProductView']);
 
+Route::post('/forgot-password', [AuthController::class, 'resetPassword']);
+Route::post('/password/update', [AuthController::class, 'updatePassword']);
 
 Route::get('/store/{store}', [StoreController::class, 'show'])->name('store.show');
 Route::get('/store/{store}/products', [ProductController::class, 'index'])->name('store.products.index');

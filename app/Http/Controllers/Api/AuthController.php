@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\EmailVerification;
+use App\Mail\PasswordReset;
 use App\Models\VerificationCode;
 use App\Models\Products;
 use App\Models\Stores;
@@ -17,6 +18,8 @@ use App\Services\LocationService;
 use App\Services\AuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 use Exception;
 
 class AuthController extends Controller
@@ -553,4 +556,162 @@ public function createPassword(Request $request)
     }
 }
 
+public function resetPassword(Request $request) {
+    $request->validate([
+        'email' => 'required|email'
+    ]);
+
+    $email = $request->email;
+
+    // Check if account exists
+    $user = User::where('email', $email)->first();
+    
+    if (!$user) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'No account found with that email address.'
+        ], 404);
+    }
+
+    $token = Str::random(64);
+    
+    // Delete any existing password reset tokens for this email
+    DB::table('password_reset_tokens')->where('email', $email)->delete();
+    
+    // Store the token in password_reset_tokens table
+    DB::table('password_reset_tokens')->insert([
+        'email' => $email,
+        'token' => $token,
+        'created_at' => Carbon::now()
+    ]);
+
+    // Prepare email data
+    $data = [
+        'token' => $token,
+        'user_name' => $user->name ?? 'User',
+        'reset_url' => env("FRONTEND_URL"). '/reset-password?token=' . $token . '&email=' . urlencode($email),
+        'app_name' => config('app.name'),
+        'expires_at' => Carbon::now()->addHours(24)->format('M j, Y \a\t g:i A')
+    ];
+
+    try {
+        // Send the password reset email
+        Mail::to($email)->send(new PasswordReset($data));
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Password reset link has been sent to your email address.'
+        ], 200);
+        
+    } catch (\Exception $e) {
+        \Log::error('Password reset email failed: ' . $e->getMessage());
+        
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Failed to send password reset email. Please try again later.'
+        ], 500);
+    }
 }
+
+public function updatePassword(Request $request) {
+    $request->validate([
+        'token' => 'required',
+        'email' => 'required|email',
+        'password' => 'required|min:8|confirmed'
+    ]);
+
+    try {
+        $resetRecord = DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->where('token', $request->token)
+            ->where('created_at', '>=', Carbon::now()->subHours(24))
+            ->first();
+
+        if (!$resetRecord) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid or expired password reset token.'
+            ], 400);
+        }
+
+        // Update the user's password
+        $user = User::where('email', $request->email)->first();
+        $user->password = Hash::make($request->password);
+        $user->save();
+
+        // Delete the used token
+        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+
+        // Generate new tokens
+        $user->tokens()->delete();
+        $accessToken = $user->createToken('auth_token', ['*'], now()->addDays(30))->plainTextToken;
+        $refreshToken = $user->createToken('refresh_token', ['refresh'], now()->addDays(90))->plainTextToken;
+
+        $productsLeft = $this->calculateProductsLeft($user);
+
+        $secure = app()->environment('production');
+        $accessCookie = cookie(
+            'access_token',
+            $accessToken,
+            60 * 24 * 30,
+            '/',
+            null,
+            $secure,  
+            true, 
+            false,
+            'Lax'
+        );
+        
+        $refreshCookie = cookie(
+            'refresh_token',
+            $refreshToken,
+            60 * 24 * 30,
+            '/',
+            null,
+            $secure,  
+            true, 
+            false,
+            'Lax'
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user' => $user,
+                'access_token' => $accessToken,
+                'refresh_token' => $refreshToken,
+                'token_type' => 'Bearer',
+                'access_token_expires_in' => 30 * 24 * 60 * 60, // in seconds
+                'refresh_token_expires_in' => 90 * 24 * 60 * 60, // in seconds
+                'free_product_remaining' => $productsLeft
+            ],
+            'message' => 'Password has been reset successfully.'
+        ], 200)->withCookie($accessCookie)->withCookie($refreshCookie);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Password reset failed.',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+private function calculateProductsLeft(User $user): int
+{
+    if ($user->premium) {
+        return PHP_INT_MAX; // or some high number
+    }
+
+    $storeData = DB::table('stores')
+        ->leftJoin('products', 'stores.id', '=', 'products.stores_id')
+        ->where('stores.user_id', $user->id)
+        ->select([
+            DB::raw('COUNT(products.id) as product_count')
+        ])
+        ->groupBy('stores.id', 'stores.user_id')
+        ->first();
+
+    return $storeData ? max(0, 5 - $storeData->product_count) : 5;
+}
+}
+
