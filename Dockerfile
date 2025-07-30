@@ -1,7 +1,6 @@
-
-# Production stage
 FROM php:8.3-fpm
 
+# Install system dependencies and PHP extensions
 RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
@@ -10,46 +9,52 @@ RUN apt-get update && apt-get install -y \
     libonig-dev \
     libxml2-dev \
     libftp-dev \
+    unzip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd zip ftp opcache \
     && pecl install redis \
-    && docker-php-ext-enable redis opcache
+    && docker-php-ext-enable redis opcache \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-    RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-    # Install PHP extensions
-    RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd ftp
-    # Install Redis extension
-    RUN pecl list | grep redis > /dev/null || pecl install redis
-    RUN docker-php-ext-enable redis
+# Set working directory
+WORKDIR /var/www
 
-    COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Set environment variable for Composer
+ENV COMPOSER_ALLOW_SUPERUSER=1
 
-    WORKDIR /var/www
+# Use production PHP configuration
+RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-    COPY . /var/www
-    COPY .env.ci .env
-    COPY backup.txt composer.json
+COPY php.ini $PHP_INI_DIR/conf.d/
+# Create a script to handle dependencies
+COPY <<EOF /usr/local/bin/docker-entrypoint.sh
+#!/bin/bash
+set -e
 
-    ENV COMPOSER_ALLOW_SUPERUSER=1
+# Check if vendor directory exists, if not install dependencies
+if [ ! -d "/var/www/vendor" ]; then
+    echo "Installing Composer dependencies..."
+    composer install --no-scripts --no-dev --optimize-autoloader
+fi
 
-    COPY --chown=www-data:www-data . /var/www
-    # Install application dependencies
-    RUN composer install --no-scripts --no-autoloader
+# Set proper permissions
+chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache 2>/dev/null || true
+chmod -R 775 /var/www/storage /var/www/bootstrap/cache 2>/dev/null || true
 
-    RUN chown -R www-data:www-data /var/www/storage \
-        && chmod -R 775 /var/www/storage
-    
-    # Generate optimized autoload files
-    RUN composer dump-autoload --optimize
+# Generate optimized autoload files
+composer dump-autoload --optimize 2>/dev/null || true
 
-    RUN chown -R www-data:www-data /var/www
+# Execute the original command
+exec "\$@"
+EOF
 
-    # PHP INI for production
-    RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-    # Add custom php.ini settings
-    COPY php.ini $PHP_INI_DIR/conf.d/
+EXPOSE 9000
 
-    EXPOSE 9000
-    CMD ["php-fpm"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["php-fpm"]

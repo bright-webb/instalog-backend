@@ -15,16 +15,16 @@ services:
       - app-network
 
   app:
-    image: brightwebb11/app:latest
+    image: brightwebb11/instalog-api:latest
     container_name: app
     environment:
       SERVICE_NAME: app
       SERVICE_TAGS: dev
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: instalog
+      DB_USERNAME: instalog
+      DB_PASSWORD: Webilor1994@..
     volumes:
       - .:/var/www
     depends_on:
@@ -48,10 +48,10 @@ services:
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: Webilor1994@..
+      MYSQL_DATABASE: instalog
+      MYSQL_USER: instalog
+      MYSQL_PASSWORD: Webilor1994@..
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -65,8 +65,8 @@ services:
       - "8080:80"
     environment:
       PMA_HOST: mysql
-      PMA_USER: ${PMA_USER}
-      PMA_PASSWORD: ${PMA_PASSWORD}
+      PMA_USER: instalog
+      PMA_PASSWORD: Webilor1994@..
     depends_on:
       - mysql
     networks:
