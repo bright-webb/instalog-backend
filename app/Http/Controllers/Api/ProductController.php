@@ -95,8 +95,11 @@ class ProductController extends Controller
                 $file = $imageData['file'];
 
                 $filename = time() . '_' . $index . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
-                $path = $file->storeAs('product-images', $filename, 'public');
-
+                
+                $path = Storage::disk('s3')->putFileAs('product-images', $file, $filename, [
+                    'visibility' => 'public'
+                ]);
+                
                 // Get file size
                 $fileSize = $file->getSize();
 
@@ -211,7 +214,7 @@ class ProductController extends Controller
     {
         try {
             $path = str_replace('/storage/', '', parse_url($imageUrl, PHP_URL_PATH));
-            Storage::disk('public')->delete($path);
+            Storage::disk('s3')->delete($path);
         } catch (Exception $e) {
             \Log::error('Failed to delete image file: ' . $e->getMessage());
         }
@@ -558,7 +561,9 @@ protected function trackUniqueView(Products $product, string $fingerprint)
                     $imageName = $imageNames[$index] ?? 'Image ' . ($index + 1);
 
                     $filename = time() . '_' . $index . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
-                    $path = $file->storeAs('product-images', $filename, 'public');
+                    $path = Storage::disk('s3')->putFileAs('product-images', $file, $filename, [
+                        'visibility' => 'public'
+                    ]);
 
                     // Get file size
                     $fileSize = $file->getSize();
@@ -648,9 +653,8 @@ protected function trackUniqueView(Products $product, string $fingerprint)
 
         // $img = Image::make($imageFile)->fit(300, 300);
         // Storage::put($thumbnailPath, $img->encode());
-
-        // For now, just store the same image as thumbnail
-        $imageFile->storeAs('products/' . $productId . '/thumbnails', $imageFile->hashName(), 'public');
+        
+        $imageFile->storeAs('products/' . $productId . '/thumbnails', $imageFile->hashName(), 's3');
 
         return $thumbnailPath;
     }

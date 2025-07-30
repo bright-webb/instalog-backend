@@ -249,37 +249,52 @@ class StoreController extends Controller
     }
 
     // Upload logo
-    public function updateLogo($slug, Request $request){
+   public function updateLogo($slug, Request $request)
+{
     $request->validate([
         'logo' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5120',
         'cropped_url' => 'nullable|string'
     ]);
 
     $store = Store::where('slug', $slug)->firstOrFail();
+
     try {
+        // Delete existing logo and cropped logo (if they exist)
+        if ($store->logo_url) {
+            $this->deleteFileFromS3($store->logo_url);
+        }
+        if ($store->logo_cropped_url) {
+            $this->deleteFileFromS3($store->logo_cropped_url);
+        }
+
+        // Upload new logo
         $image = $request->file('logo');
         $croppedImage = $request->input('cropped_url');
 
-        $filename = 'logo-' . Str::uuid() . '-' . $image->getClientOriginalExtension(); // Fixed typo
+        $filename = 'logo-' . Str::uuid() . '.' . $image->getClientOriginalExtension(); // Fixed extension
         $directory = 'stores/' . $store->id . '/logos';
 
-        $originalPath = $image->storeAs($directory, $filename,'public');
+        $originalPath = Storage::disk('s3')->putFileAs($directory, $image, $filename, [
+            'visibility' => 'public',
+        ]);
 
-        if($croppedImage) {
+        // Handle cropped image (if provided)
+        if ($croppedImage) {
             $croppedFilename = 'cropped-' . $filename;
             $croppedPath = $directory . '/' . $croppedFilename;
             $this->saveBase64Image($croppedImage, $croppedPath);
-            $store->logo_url = url(Storage::url($originalPath)); 
-            $store->logo_cropped_url = url(Storage::url($croppedPath));
+            $store->logo_url = Storage::disk('s3')->url($originalPath); 
+            $store->logo_cropped_url = Storage::disk('s3')->url($croppedPath);
         } else {
-            $store->logo_url = url(Storage::url($originalPath));
+            $store->logo_url = Storage::disk('s3')->url($originalPath);
+            $store->logo_cropped_url = null; // Clear old cropped image if not provided
         }
 
         $store->save(); 
 
         return response()->json([
             'success' => true,
-            'message' => 'Logo uploaded successfully',
+            'message' => 'Logo updated successfully',
             'logo_url' => $store->logo_url,
             'logo_cropped_url' => $store->logo_cropped_url ?? null,
         ], 200);
@@ -287,10 +302,57 @@ class StoreController extends Controller
     } catch(Exception $e) {
         return response()->json([
             'success' => false,
-            'message' => 'Failed to upload logo',
+            'message' => 'Failed to update logo',
             'error' => $e->getMessage()
         ], 500);
     }
+}
+
+/**
+ * Helper function to delete a file from S3
+ */
+/**
+ * Helper function to delete a file from S3
+ */
+private function deleteFileFromS3($url)
+{
+    try {
+        if (empty($url)) {
+            return;
+        }
+
+        // Handle different URL formats
+        if (str_contains($url, 'amazonaws.com')) {
+            // S3 URL format: https://bucket.s3.region.amazonaws.com/path/to/file
+            $key = ltrim(parse_url($url, PHP_URL_PATH), '/');
+        } elseif (str_contains($url, '/storage/')) {
+            // Local storage URL format
+            $key = str_replace('/storage/', '', parse_url($url, PHP_URL_PATH));
+        } else {
+            // Direct path format
+            $key = ltrim(parse_url($url, PHP_URL_PATH), '/');
+        }
+
+        \Log::info("Attempting to delete S3 file: " . $key);
+
+        if (Storage::disk('s3')->exists($key)) {
+            Storage::disk('s3')->delete($key);
+            \Log::info("Successfully deleted: " . $key);
+        } else {
+            \Log::warning("File not found in S3: " . $key);
+        }
+    } catch (Exception $e) {
+        \Log::error("S3 Deletion Error for URL '$url': " . $e->getMessage());
+    }
+}
+/**
+ * Helper function to save Base64 image to S3
+ */
+private function saveBase64Image($base64Image, $path)
+{
+    $imageData = explode(',', $base64Image)[1]; // Remove data:image/... prefix
+    $decodedImage = base64_decode($imageData);
+    Storage::disk('s3')->put($path, $decodedImage, ['visibility' => 'public']);
 }
 
  public function updateCover(Request $request, $slug){
@@ -302,22 +364,32 @@ class StoreController extends Controller
     $store = Store::where('slug', $slug)->firstOrFail();
 
     try {
+        if ($store->cover_url) {
+            $this->deleteFileFromS3($store->cover_url);
+        }
+        if ($store->cover_cropped_url) {
+            $this->deleteFileFromS3($store->cover_cropped_url);
+        }
+
         $image = $request->file('file');
         $croppedImage = $request->input('cropped_url');
 
         $filename = 'cover-' . Str::uuid() . '.' . $image->getClientOriginalExtension();
         $directory = 'stores/' . $store->slug . '/covers';
-        $originalPath = $image->storeAs($directory, $filename, 'public');
+        $originalPath = Storage::disk('s3')->putFileAs($directory, $image, $filename, [
+            'visibility' => 'public',
+        ]);
 
         if($croppedImage) {
-            $croppedFileName = 'cropped - ' . $filename;
+            $croppedFileName = 'cropped-' . $filename; 
             $croppedPath = $directory . '/' . $croppedFileName;
             $this->saveBase64Image($croppedImage, $croppedPath);
 
-            $store->cover_url = url(Storage::url($originalPath));
-            $store->cover_cropped_url = url(Storage::url($croppedPath));
+            $store->cover_url = Storage::disk('s3')->url($originalPath); 
+            $store->cover_cropped_url = Storage::disk('s3')->url($croppedPath); 
         } else {
-            $store->cover_url = url(Storage::url($originalPath));
+            $store->cover_url = Storage::disk('s3')->url($originalPath); 
+            $store->cover_cropped_url = null; 
         }
 
         $store->save();
@@ -325,7 +397,7 @@ class StoreController extends Controller
             'success' => true,
             'message' => 'Cover photo uploaded successfully',
             'cover_url' => $store->cover_url,
-            'cover_cropped_url' => $store->cover_cropped_url
+            'cover_cropped_url' => $store->cover_cropped_url ?? null
         ], 200);
     } catch(Exception $e){
         return response()->json([
@@ -334,7 +406,7 @@ class StoreController extends Controller
             'error' => $e->getMessage()
         ], 500);
     }
- }
+}
 
  // Rate store
 public function rateStore(Request $request, $storeSlug)
@@ -548,15 +620,7 @@ public function recordInquiry(Request $request, $storeSlug)
         'message' => 'Inquiry recorded',
     ]);
 }
-    private function saveBase64Image(string $base64Image, string $path){
-        if(strpos($base64Image, 'base64') !== false){
-            $image = explode(',', $base64Image);
-            $base64Image = end($image);
-        }
-
-        $imageData = base64_decode($base64Image);
-        Storage::disk('public')->put($path, $imageData);
-    }
+ 
 
 public function storeAnalytics(Request $request)
 {
