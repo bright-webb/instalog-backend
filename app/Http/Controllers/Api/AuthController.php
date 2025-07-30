@@ -608,7 +608,8 @@ public function resetPassword(Request $request) {
         
         return response()->json([
             'status' => 'error',
-            'message' => 'Failed to send password reset email. Please try again later.'
+            'message' => 'Failed to send password reset email. Please try again later.',
+            'error' => $e->getMessage()
         ], 500);
     }
 }
@@ -699,7 +700,7 @@ public function updatePassword(Request $request) {
 private function calculateProductsLeft(User $user): int
 {
     if ($user->premium) {
-        return PHP_INT_MAX; // or some high number
+        return PHP_INT_MAX;
     }
 
     $storeData = DB::table('stores')
