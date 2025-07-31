@@ -23,7 +23,7 @@ services:
       DB_PORT: 3306
       DB_DATABASE: instalog
       DB_USERNAME: instalog
-      DB_PASSWORD: Webilor1994@..
+      DB_PASSWORD: 
     volumes:
       - .:/var/www
     depends_on:
@@ -65,7 +65,7 @@ services:
     environment:
       PMA_HOST: mysql
       PMA_USER: instalog
-      PMA_PASSWORD: Webilor1994@..
+      PMA_PASSWORD: 
     depends_on:
       - mysql
     networks:
