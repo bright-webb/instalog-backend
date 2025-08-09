@@ -34,8 +34,7 @@ class EmailVerification extends Mailable
     {
         return new Envelope(
             subject: 'Verify Your Email Address - Action Required',
-            from: config('mail.from.address', 'noreply@yourstore.com'),
-            replyTo: config('mail.reply_to.address', 'support@yourstore.com'),
+            from: env('MAIL_FROM_ADDRESS', 'noreply@deyna.com'),
         );
     }
 
@@ -51,8 +50,8 @@ class EmailVerification extends Mailable
                 'verificationCode' => $this->verificationCode,
                 'verificationLink' => $this->generateVerificationLink(),
                 'expiresAt' => $this->expiresAt,
-                'companyName' => config('app.name', 'Walink'),
-                'supportEmail' => config('mail.support.address', 'support@walink.store'),
+                'companyName' => config('app.name', 'Deyna'),
+                'supportEmail' => config('mail.support.address', 'support@deyna.store'),
             ]
         );
     }

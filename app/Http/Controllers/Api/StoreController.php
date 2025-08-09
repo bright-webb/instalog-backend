@@ -107,7 +107,6 @@ class StoreController extends Controller
                 'regex:/^\+?[1-9]\d{1,14}$/',
                 'unique:stores,whatsapp_number',
             ],
-            'businessEmail' => 'required|email|max:255',
             'socialHandles' => 'nullable|array',
             'socialHandles.Instagram' => 'nullable|string|max:100',
             'socialHandles.Facebook' => 'nullable|string|max:100',
@@ -127,8 +126,6 @@ class StoreController extends Controller
             'whatsappNumber.required' => 'Whatsapp number is required.',
             'whatsappNumber.regex' => 'Please enter a valid phone number with country code.',
             'whatsappNumber.unique' => 'This Whatsapp number is already registered.',
-            'businessEmail.required' => 'Business name is required.',
-            'businessEmail.email' => 'Please enter a valid email address',
             'deliveryOptions.required' => 'Please select at least one delivery options.',
             'deliveryOptions.*in' => 'Invalid delivery options select.',
         ]);
@@ -278,7 +275,6 @@ class StoreController extends Controller
             'visibility' => 'public',
         ]);
 
-        // Handle cropped image (if provided)
         if ($croppedImage) {
             $croppedFilename = 'cropped-' . $filename;
             $croppedPath = $directory . '/' . $croppedFilename;
@@ -287,7 +283,7 @@ class StoreController extends Controller
             $store->logo_cropped_url = Storage::disk('s3')->url($croppedPath);
         } else {
             $store->logo_url = Storage::disk('s3')->url($originalPath);
-            $store->logo_cropped_url = null; // Clear old cropped image if not provided
+            $store->logo_cropped_url = null; 
         }
 
         $store->save(); 
@@ -323,7 +319,6 @@ private function deleteFileFromS3($url)
 
         // Handle different URL formats
         if (str_contains($url, 'amazonaws.com')) {
-            // S3 URL format: https://bucket.s3.region.amazonaws.com/path/to/file
             $key = ltrim(parse_url($url, PHP_URL_PATH), '/');
         } elseif (str_contains($url, '/storage/')) {
             // Local storage URL format
@@ -350,7 +345,7 @@ private function deleteFileFromS3($url)
  */
 private function saveBase64Image($base64Image, $path)
 {
-    $imageData = explode(',', $base64Image)[1]; // Remove data:image/... prefix
+    $imageData = explode(',', $base64Image)[1]; 
     $decodedImage = base64_decode($imageData);
     Storage::disk('s3')->put($path, $decodedImage, ['visibility' => 'public']);
 }

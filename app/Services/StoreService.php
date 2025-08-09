@@ -41,7 +41,6 @@ class StoreService {
                 'city' => $data['city'] ?? null,
                 'country' => $data['country'] ?? null,
                 'whatsapp_number' => $data['whatsappNumber'],
-                'business_email' => $data['businessEmail'],
                 'social_handles' => json_encode($this->processSocialHandles($data['socialHandles'] ?? [])),
                 'delivery_options' => json_encode($data['deliveryOptions'] ?? []),
                 'is_active' => true,

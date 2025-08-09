@@ -23,149 +23,162 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class ProductController extends Controller
 {
-    public function store(Request $request)
-    {
-        
-        try {
-            $validated = $request->validate([
-                'name' => 'required|string|max:255',
-                'description' => 'nullable|string',
-                'price' => 'required|numeric|min:0',
-                'category' => 'nullable|string|max:255',
-                'store_id' => 'required|exists:stores,id',
-                'is_active' => 'string',
-                'sort_order' => 'integer|min:0',
-                'images' => 'required|min:1|max:10',
-                'images.*.file' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5048',
-                'images.*.name' => 'required|string',
-                'images.*.isPrimary' => 'required|boolean'
-            ]);
+public function store(Request $request)
+{
+    try {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'price' => 'required|numeric|min:0',
+            'category' => 'nullable|string|max:255',
+            'store_id' => 'required|exists:stores,id',
+            'is_active' => 'sometimes|string',
+            'sort_order' => 'sometimes|integer|min:0',
+            'images' => 'required|array|min:1|max:10',
+            'images.*.file' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:5048',
+            'images.*.name' => 'required|string',
+            'images.*.isPrimary' => 'required|boolean'
+        ]);
 
-           $user = auth()->user();
+        $user = auth()->user();
 
-            // Check if user is not premium
-            if (!$user->is_premium) {
-                // Count the number of products they already have for this store
-                $productCount = Products::where('stores_id', $validated['store_id'])->count();
-
-                if ($productCount >= 5) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => "You've reached your limits of 5 products.",
-                        "error_code" => 600
-                    ], 400);
-                }
-            }
-
-
-            $hasPrimaryImage = collect($validated['images'])->contains('isPrimary', true);
-            if (!$hasPrimaryImage) {
-                // Set first image as primary if none selected
-                $validated['images'][0]['isPrimary'] = true;
-            }
-            // Get store details
-            $store = Store::where('id', $validated['store_id'])->first();
-            $primaryCount = collect($validated['images'])->where('isPrimary', true)->count();
-            if ($primaryCount > 1) {
+        // Check if user is not premium
+        if (!$user->is_premium) {
+            $productCount = Products::where('stores_id', $validated['store_id'])->count();
+            if ($productCount >= 5) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Only one image can be set as primary',
-                    'errors' => ['images' => 'Only one image can be set as primary']
-                ], 422);
+                    'message' => "You've reached your limit of 5 products.",
+                    "error_code" => 600
+                ], 400);
+            }
+        }
+
+        // Ensure only one primary image exists
+        $primaryImages = array_filter($validated['images'], function($image) {
+            return $image['isPrimary'];
+        });
+
+        if (count($primaryImages) > 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only one image can be set as primary',
+                'errors' => ['images' => 'Only one image can be set as primary']
+            ], 422);
+        }
+
+        // If no primary image, set first one as primary
+        if (count($primaryImages) === 0) {
+            $validated['images'][0]['isPrimary'] = true;
+        }
+
+        DB::beginTransaction();
+
+        // Generate unique slug
+        $slug = $this->generateSlug($validated['name']);
+        $product = Products::create([
+            'stores_id' => $validated['store_id'],
+            'name' => $validated['name'],
+            'slug' => $slug,
+            'description' => $validated['description'],
+            'price' => $validated['price'],
+            'category' => $validated['category'],
+            'is_active' => $validated['is_active'] ?? true,
+            'sort_order' => $validated['sort_order'] ?? 0,
+        ]);
+
+        $uploadedImages = [];
+        $primaryImageSet = false;
+        $store = Store::where('id', $validated['store_id'])->first();
+        
+        foreach ($validated['images'] as $index => $imageData) {
+            $file = $imageData['file'];
+            $isPrimary = $imageData['isPrimary'];
+
+            // Ensure only one primary image is processed
+            if ($isPrimary && $primaryImageSet) {
+                continue; 
             }
 
-            DB::beginTransaction();
+            $filename = time() . '_' . $index . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+             
+            $path = 'product-images/' . $filename;
+    
+            // Store the file
+            Storage::disk('s3')->put($path, file_get_contents($file), [
+                'visibility' => 'public',
+                'ContentType' => $file->getMimeType()
+            ]);
+        
+            // Construct the full URL
+            $fileUrl = Storage::disk('s3')->url($path);
+            
+            $fileSize = $file->getSize();
 
-            // Generate unique slug
-            $slug = $this->generateSlug($validated['name']);
-            $product = Products::create([
-                'stores_id' => $validated['store_id'],
-                'name' => $validated['name'],
-                'slug' => $slug,
-                'description' => $validated['description'],
-                'price' => $validated['price'],
-                'category' => $validated['category'],
-                'is_active' => $validated['is_active'] ?? true,
-                'sort_order' => $validated['sort_order'] ?? 0,
+            $productImage = ProductImage::create([
+                'products_id' => $product->id,
+                'image_url' => $fileUrl,
+                'image_name' => $imageData['name'],
+                'image_meta' => json_encode([
+                    'original_name' => $file->getClientOriginalName(),
+                    'mime_type' => $file->getMimeType(),
+                    'is_primary' => $isPrimary,
+                    'sort_order' => $index
+                ]),
+                'image_size' => $this->formatFileSize($fileSize)
             ]);
 
-            // Proccess and store images
-            $uploadedImages = [];
-            foreach ($validated['images'] as $index => $imageData) {
-                $file = $imageData['file'];
-
-                $filename = time() . '_' . $index . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
-                
-                $path = Storage::disk('s3')->putFileAs('product-images', $file, $filename, [
-                    'visibility' => 'public'
-                ]);
-                
-                // Get file size
-                $fileSize = $file->getSize();
-
-                $productImage = ProductImage::create([
-                    'products_id' => $product->id,
-                    'image_url' => Storage::url($path),
-                    'image_name' => $imageData['name'],
-                    'image_meta' => json_encode([
-                        'original_name' => $file->getClientOriginalName(),
-                        'mime_type' => $file->getMimeType(),
-                        'is_primary' => $imageData['isPrimary'],
-                        'sort_order' => $index
-                    ]),
-                    'image_size' => $this->formatFileSize($fileSize)
-                ]);
-
-                $uploadedImages[] = [
-                    'id' => $productImage->id,
-                    'url' => $productImage->image_url,
-                    'name' => $productImage->image_name,
-                    'is_primary' => $imageData['isPrimary'],
-                    'size' => $productImage->image_size
-                ];
+            if ($isPrimary) {
+                $primaryImageSet = true;
             }
 
-            DB::commit();
-
-            $product->refresh();
-            $product->load('images');
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Product created successfully',
-                'data' => [
-                    'product' => $product,
-                    'images' => $uploadedImages,
-                    'shareable_url' => url("/{$store->slug}/{$product->slug}"),
-                    'admin_url' => url("/admin/products/{$product->id}")
-                ]
-            ], 201);
-
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-
-        } catch (Exception $e) {
-            DB::rollBack();
-
-            // Clean up uploaded files if any
-            if (isset($uploadedImages)) {
-                foreach ($uploadedImages as $image) {
-                    $this->deleteImageFile($image['url']);
-                }
-            }
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to create product: ' . $e->getMessage(),
-                'error' => config('app.debug') ? $e->getTrace() : null
-            ], 500);
+            $uploadedImages[] = [
+                'id' => $productImage->id,
+                'url' => $productImage->image_url,
+                'name' => $productImage->image_name,
+                'is_primary' => $isPrimary,
+                'size' => $productImage->image_size
+            ];
         }
+
+        DB::commit();
+
+        $product->refresh()->load('images');
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product created successfully',
+            'data' => [
+                'product' => $product,
+                'images' => $uploadedImages,
+                'shareable_url' => env("FRONTEND_URL"). "/{$store->slug}/{$product->slug}",
+                'admin_url' => url("/admin/products/{$product->id}")
+            ]
+        ], 201);
+
+    } catch (ValidationException $e) {
+        DB::rollBack();
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        DB::rollBack();
+        
+        if (isset($uploadedImages)) {
+            foreach ($uploadedImages as $image) {
+                $this->deleteImageFile($image['url']);
+            }
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to create product: ' . $e->getMessage(),
+            'error' => config('app.debug') ? $e->getTrace() : null
+        ], 500);
     }
+}
     /*
 
     */
@@ -364,7 +377,7 @@ public function show($store, $product)
     }
 }
 
-// Optimized version using cursor-based pagination (better for infinite scroll performance)
+
 public function indexWithCursor($store = null)
 {
     try {
@@ -389,7 +402,7 @@ public function indexWithCursor($store = null)
         
         $query->orderBy('id', 'desc');
         
-        $products = $query->limit($perPage + 1)->get(); // Get one extra to check if there are more
+        $products = $query->limit($perPage + 1)->get(); 
         
         $hasMore = $products->count() > $perPage;
         if ($hasMore) {
@@ -811,7 +824,6 @@ protected function trackUniqueView(Products $product, string $fingerprint)
 }
     protected function generateFingerprint(Request $request)
     {
-        // Create a more persistent fingerprint than just IP
         $agent = new Agent();
         $components = [
             $request->ip(),

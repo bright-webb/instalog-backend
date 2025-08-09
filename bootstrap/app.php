@@ -12,7 +12,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-      
+      $middleware->append(\App\Http\Middleware\CorsMiddleware::class);
         $middleware->alias([
             'check.token.expiry' => \App\Http\Middleware\CheckTokenExpiry::class,
             'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'precognitive' => \Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests::class,
             'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
             'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+            'cors' => \App\Http\Middleware\CorsMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

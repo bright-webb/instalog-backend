@@ -15,7 +15,6 @@ use App\Models\Product;
  * @property int $user_id
  * @property string $business_name
  * @property string $slug
- * @property string $business_email
  * @property string $location
  * @property array $social_handles
  * @property array $delivery_options
@@ -57,7 +56,6 @@ class Stores extends Model
     'description',
     'location',
     'whatsapp_number',
-    'business_email',
     'social_handles',
     'delivery_options',
     'is_active',

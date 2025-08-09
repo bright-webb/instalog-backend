@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
+use Carbon\Carbon;
 
 class PaymentController extends Controller
 {
@@ -19,9 +20,6 @@ class PaymentController extends Controller
         $this->client = $client;
     }
 
-    public function verify(){
-      
-    }
 
    public function getPaymentPlan(Request $request)
 {
@@ -38,6 +36,7 @@ class PaymentController extends Controller
                     ->value('is_premium');
 
                 $planData->name = $planData->isPremium ? 'Premium Plan' : 'Free Plan';
+                $planData->email = $user->email;
             }
             
             return $planData;
@@ -68,52 +67,41 @@ class PaymentController extends Controller
 public function createPlan(Request $request)
 {
     $request->validate([
-        'plan_name' => 'required|string',
+        'name' => 'required|string',
         'amount' => 'required|numeric',
         'interval' => 'required|in:daily,weekly,monthly,yearly',
-        'duration' => 'required|integer'
     ]);
 
     $user = auth()->user();
     
     try {
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . env('FLUTTERWAVE_TEST_SECRET_KEY'),
-            'Content-Type' => 'application/json',
-        ])->post('https://api.flutterwave.com/v3/payment-plans', [
-            'amount' => $request->input('amount') * 100, // Convert to kobo
-            'name' => $request->input('plan_name'),
-            'interval' => $request->input('interval'),
-            'duration' => $request->input('duration'),
-            'currency' => 'NGN'
-        ]);
-
-        if ($response->successful()) {
-            $planData = $response->json();
-            
-            // Save plan to database
-            $plan = [
+      
+        $data = [
                 'user_id' => $user->id,
-                'plan_id' => $planData['data']['id'],
-                'name' => $request->input('plan_name'),
-                'price' => $request->input('amount'),
-                'interval' => $request->input('interval'),
-                'duration' => $request->input('duration')
+                'name' => $request->name,
+                'plan_id' => $request->plan_id,
+                'amount' => $request->amount,
+                'interval' => $request->interval,
+                'integration' => $request->integration,
+                'plan_code' => $request->plan_id,
+                'created_at' => now(),
+                'updated_at' => now()
             ];
-
-            DB::table('plans')->insert($plan);
+            
+        $query = DB::table('plans')->insert($data);
+        if ($query) {
+           
+           
 
             return response()->json([
                 'success' => true,
                 'message' => 'Plan created successfully',
                 'data' => [
-                    'id' => $planData['data']['id'],
-                    'name' => $request->input('plan_name'),
+                    'name' => $request->input('name'),
                     'amount' => $request->input('amount'),
                     'interval' => $request->input('interval'),
-                    'duration' => $request->input('duration')
                 ]
-            ]);
+            ], 200);
         }
 
         return response()->json([
@@ -125,6 +113,48 @@ public function createPlan(Request $request)
         return response()->json([
             'status' => 'error',
             'message' => 'An error occurred: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+public function verifyPayment(Request $request){
+    $amount = $request->amount;
+    $ref = $request->tx_ref;
+    $txID = $request->transaction_id;
+    
+    $user = auth()->user();
+    
+    $data = [
+        'user_id' => $user->id,
+        'transaction_id' => $txID,
+        'amount' => $amount,
+        'currency' => 'NGN',
+        'status' => 'completed',
+        'paid_at' => now(),
+        'metadata' => json_encode([
+            'plan' => 'Pro Plan',
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->header('User-Agent'),
+            'created_at' => now(),
+            'updated_at' => now()
+        ]),
+        'reference_id' => $ref,
+        'created_at' => now(),
+        'updated_at' => now()
+    ];
+    
+    $query = DB::table('subscription_payments')->insert($data);
+    if($query){
+        $this->activateSubscription($user, $request->payment_type, $amount, $request);
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment successful',
+            'data' => $data
+        ], 201);
+    } else {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to create payment record'
         ], 500);
     }
 }
@@ -168,6 +198,33 @@ public function createTransferPayment(Request $request){
             'message' => 'Failed to create payment record'
         ], 500);
     }
+}
+
+
+// Activate subscriptions
+private function activateSubscription($user, $payment_type, $amount, Request $request) {
+    $data = [
+        'user_id' => $user->id,
+        'plan' => 'pro plan',
+        'status' => 'active',
+        'starts_at' => now(),
+        'ends_at' => now()->addDays(30),
+        'current_period_ends_at' => now()->addDays(30),
+        'payment_method' => $payment_type,
+        'amount' => $amount,
+        'currency' => 'NGN',
+        'metadata' => json_encode([
+            'plan' => 'Pro Plan',
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->header('User-Agent'),
+            'created_at' => now(),
+            'updated_at' => now()
+        ]),
+        'created_at' => now(),
+        'updated_at' => now()
+    ];
+    
+    DB::table('subscriptions')->insert($data);
 }
 
 

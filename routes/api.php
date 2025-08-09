@@ -8,7 +8,6 @@ use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PageViewController;
 use App\Http\Controllers\Api\PaymentController;
 
-
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('/send', [PaymentController::class, 'verify']);
@@ -40,8 +39,11 @@ Route::middleware(['throttle:100,1'])->group(function () {
     Route::post('/page-views/batch', [PageViewController::class, 'batchStore']);
 });
 
+
+
 Route::middleware('auth:sanctum')->group(function(){
     Route::get('/get-payment-plan', [PaymentController::class, 'getPaymentPlan']);
+    Route::post('/verify-payment', [PaymentController::class, 'verifyPayment']);
     Route::post('/create-plan', [PaymentController::class, 'createPlan']);
     Route::post('/create-payment', [PaymentController::class, 'createTransferPayment']);
     Route::post('/auth/password/create', [AuthController::class, 'createPassword']);
